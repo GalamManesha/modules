@@ -2,7 +2,7 @@ pipeline {
   agent any
 
   environment {
-    AWS_REGION     = "ap-south-1"
+    AWS_REGION      = "ap-south-1"
     MODULES_GIT_URL = "https://github.com/GalamManesha/modules.git"
     MODULES_BRANCH  = "main"
   }
@@ -13,23 +13,23 @@ pipeline {
   }
 
   stages {
-    stage('Checkout repo') {
+    stage('Checkout repo (contains module/main.tf)') {
       steps {
-        // checkout the repo that contains this Jenkinsfile and terraform-workspace folder
+        // checkout the repo that triggered the build (should contain module/main.tf)
         checkout scm
       }
     }
 
-    stage('Fetch module (ensure terraform-workspace/modules/module)') {
+    stage('Fetch modules repo into module/modules/module') {
       steps {
         script {
           sh '''
             set -e
             tmpdir=$(mktemp -d)
             git clone --depth 1 --branch ${MODULES_BRANCH} ${MODULES_GIT_URL} "$tmpdir"
-            mkdir -p terraform-workspace/modules/module
+            mkdir -p module/modules/module
             if [ -d "$tmpdir/module" ]; then
-              rsync -a --delete "$tmpdir/module/" terraform-workspace/modules/module/
+              rsync -a --delete "$tmpdir/module/" module/modules/module/
             else
               echo "ERROR: expected folder 'module' not found in modules repo root."
               ls -la "$tmpdir"
@@ -44,12 +44,13 @@ pipeline {
 
     stage('Terraform Init') {
       steps {
-        dir('terraform-workspace') {
+        dir('module') {
           withCredentials([[
             $class: 'AmazonWebServicesCredentialsBinding',
             credentialsId: 'aws-cred'
           ]]) {
             sh '''
+              set -e
               terraform --version
               terraform init -input=false -no-color
             '''
@@ -66,10 +67,11 @@ pipeline {
             credentialsId: 'aws-cred'
           ]]) {
             sh '''
+              set -e
               terraform plan -out=tfplan -input=false -no-color
               terraform show -no-color tfplan > plan.txt || true
             '''
-            archiveArtifacts artifacts: 'terraform-workspace/plan.txt', onlyIfSuccessful: true
+            archiveArtifacts artifacts: 'module/plan.txt', onlyIfSuccessful: true
           }
         }
       }
@@ -83,6 +85,7 @@ pipeline {
             credentialsId: 'aws-cred'
           ]]) {
             sh '''
+              set -e
               terraform apply -input=false -auto-approve tfplan
             '''
           }
